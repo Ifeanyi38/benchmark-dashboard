@@ -24,6 +24,7 @@ function App() {
   const [loading, setLoading]             = useState(false)
   const [message, setMessage]             = useState(null)
   const [messageType, setMessageType]     = useState('info')
+  const [benchmarkMeta, setBenchmarkMeta] = useState(null)
 
   const chart1Ref = useRef(null)
   const chart2Ref = useRef(null)
@@ -77,6 +78,7 @@ function App() {
       await fetchStatus()
       await fetchIndexStatus()
       setResults([])
+      setBenchmarkMeta(null)
     } catch (err) {
       showMessage('Failed to clear databases', 'error')
     }
@@ -91,7 +93,7 @@ function App() {
       showMessage(`Both databases seeded successfully with ${selectedSize} dataset`)
       await fetchStatus()
     } catch (err) {
-      showMessage('Failed to seed databases', 'error')
+      showMessage(err.response?.data?.message || 'Failed to seed databases', 'error')
     }
     setLoading(false)
   }
@@ -146,6 +148,18 @@ function App() {
       const ops = selectAll ? 'all' : selectedOps
       const res = await runBenchmark(ops, benchmarkRuns)
       setResults(res.data.results)
+
+      const currentStatus = await getStatus()
+      setBenchmarkMeta({
+        mysqlBookings:  currentStatus.data.mysql.bookings,
+        mongoBookings:  currentStatus.data.mongodb.bookings,
+        mysqlFlights:   currentStatus.data.mysql.flights,
+        mongoFlights:   currentStatus.data.mongodb.flights,
+        indexed:        indexStatus?.indexed || false,
+        runs:           benchmarkRuns,
+        timestamp:      new Date().toLocaleString(),
+      })
+
       showMessage('Benchmark completed successfully')
     } catch (err) {
       showMessage('Failed to run benchmark', 'error')
@@ -172,7 +186,7 @@ function App() {
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')
     a.href     = url
-    a.download = `benchmark_results_${selectedSize}_${Date.now()}.csv`
+    a.download = `benchmark_${benchmarkMeta?.mysqlBookings || 0}_bookings_${benchmarkMeta?.indexed ? 'indexed' : 'no_index'}_${Date.now()}.csv`
     a.click()
   }
 
@@ -182,7 +196,7 @@ function App() {
       const dataUrl = await toPng(ref.current, { quality: 1.0, pixelRatio: 2 })
       const a       = document.createElement('a')
       a.href        = dataUrl
-      a.download    = `${filename}_${selectedSize}_${Date.now()}.png`
+      a.download    = `${filename}_${benchmarkMeta?.mysqlBookings || 0}_bookings_${benchmarkMeta?.indexed ? 'indexed' : 'no_index'}_${Date.now()}.png`
       a.click()
     } catch (err) {
       showMessage('Failed to download chart', 'error')
@@ -209,6 +223,10 @@ function App() {
     UPDATE: '#f59e0b',
     DELETE: '#ef4444'
   }
+
+  const chartSubtitle = benchmarkMeta
+    ? `MySQL: ${benchmarkMeta.mysqlBookings?.toLocaleString()} bookings | MongoDB: ${benchmarkMeta.mongoBookings?.toLocaleString()} bookings | Indexes: ${benchmarkMeta.indexed ? 'Yes' : 'No'} | Runs: ${benchmarkMeta.runs} | ${benchmarkMeta.timestamp}`
+    : ''
 
   return (
     <div style={{ fontFamily: 'Arial, sans-serif', maxWidth: '1400px', margin: '0 auto', padding: '24px', background: '#f8f9fa', minHeight: '100vh' }}>
@@ -267,6 +285,12 @@ function App() {
               </table>
             ) : (
               <p style={{ color: '#9ca3af', fontSize: '13px' }}>Loading...</p>
+            )}
+
+            {status?.seeding_active && (
+              <div style={{ marginTop: '12px', padding: '8px 12px', borderRadius: '6px', background: '#dbeafe', fontSize: '12px', color: '#1e40af' }}>
+                Seeding in progress...
+              </div>
             )}
 
             <div style={{
@@ -328,7 +352,7 @@ function App() {
             <button
               onClick={handleAddIndexes}
               disabled={loading}
-              style={{ width: '100%', padding: '10px', background: '#dcfce7', color: '#166634', border: '1px solid #86efac', borderRadius: '8px', cursor: 'pointer', fontSize: '14px', fontWeight: '500', marginBottom: '10px' }}
+              style={{ width: '100%', padding: '10px', background: '#dcfce7', color: '#166534', border: '1px solid #86efac', borderRadius: '8px', cursor: 'pointer', fontSize: '14px', fontWeight: '500', marginBottom: '10px' }}
             >
               Add Indexes
             </button>
@@ -405,7 +429,7 @@ function App() {
             <>
               {/* Results Table */}
               <div style={{ background: 'white', borderRadius: '12px', padding: '20px', border: '1px solid #e5e7eb' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                   <h2 style={{ margin: 0, fontSize: '16px', color: '#0a1628' }}>Benchmark Results</h2>
                   <button
                     onClick={handleExportCSV}
@@ -414,6 +438,12 @@ function App() {
                     Export CSV
                   </button>
                 </div>
+
+                {benchmarkMeta && (
+                  <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '16px' }}>
+                    MySQL: {benchmarkMeta.mysqlBookings?.toLocaleString()} bookings | MongoDB: {benchmarkMeta.mongoBookings?.toLocaleString()} bookings | Indexes: {benchmarkMeta.indexed ? 'Yes' : 'No'} | {benchmarkMeta.timestamp}
+                  </p>
+                )}
 
                 <div style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
@@ -464,7 +494,7 @@ function App() {
               {/* Chart 1 — Average query time */}
               <div style={{ background: 'white', borderRadius: '12px', padding: '20px', border: '1px solid #e5e7eb' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <h2 style={{ margin: 0, fontSize: '16px', color: '#0a1628' }}>Average Query Time (ms)</h2>
+                  <h2 style={{ margin: 0, fontSize: '16px', color: '#0a1628' }}>Average Query Time (ms) — Log Scale</h2>
                   <button
                     onClick={() => handleDownloadChart(chart1Ref, 'chart_avg')}
                     style={{ padding: '8px 16px', background: '#0a1628', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' }}
@@ -476,14 +506,22 @@ function App() {
                   <p style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: '600', color: '#0a1628', textAlign: 'center' }}>
                     MySQL vs MongoDB — Average Query Time per Operation (ms)
                   </p>
-                  <p style={{ margin: '0 0 16px', fontSize: '12px', color: '#6b7280', textAlign: 'center' }}>
-                    Dataset size: {selectedSize} | Runs per operation: {benchmarkRuns}
+                  <p style={{ margin: '0 0 4px', fontSize: '11px', color: '#6b7280', textAlign: 'center' }}>
+                    {chartSubtitle}
+                  </p>
+                  <p style={{ margin: '0 0 16px', fontSize: '11px', color: '#9ca3af', textAlign: 'center', fontStyle: 'italic' }}>
+                    Y-axis uses logarithmic scale to show variation across all operations
                   </p>
                   <ResponsiveContainer width="100%" height={320}>
-                    <BarChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 80 }}>
+                    <BarChart data={chartData} margin={{ top: 10, right: 30, left: 20, bottom: 80 }}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="name" angle={-30} textAnchor="end" tick={{ fontSize: 11 }} interval={0} />
-                      <YAxis tick={{ fontSize: 11 }} label={{ value: 'Time (ms)', angle: -90, position: 'insideLeft', offset: 10, style: { fontSize: 11 } }} />
+                      <YAxis
+                        scale="log"
+                        domain={['auto', 'auto']}
+                        tick={{ fontSize: 11 }}
+                        label={{ value: 'Time (ms) log scale', angle: -90, position: 'insideLeft', offset: 10, style: { fontSize: 11 } }}
+                      />
                       <Tooltip formatter={(value) => `${value}ms`} />
                       <Legend verticalAlign="top" height={36} />
                       <Bar dataKey="MySQL"   fill="#3b82f6" />
@@ -496,7 +534,7 @@ function App() {
               {/* Chart 2 — Standard deviation */}
               <div style={{ background: 'white', borderRadius: '12px', padding: '20px', border: '1px solid #e5e7eb' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <h2 style={{ margin: 0, fontSize: '16px', color: '#0a1628' }}>Consistency — Standard Deviation (ms)</h2>
+                  <h2 style={{ margin: 0, fontSize: '16px', color: '#0a1628' }}>Consistency — Standard Deviation (ms) — Log Scale</h2>
                   <button
                     onClick={() => handleDownloadChart(chart2Ref, 'chart_stdev')}
                     style={{ padding: '8px 16px', background: '#0a1628', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' }}
@@ -508,14 +546,22 @@ function App() {
                   <p style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: '600', color: '#0a1628', textAlign: 'center' }}>
                     MySQL vs MongoDB — Consistency (Standard Deviation in ms)
                   </p>
-                  <p style={{ margin: '0 0 16px', fontSize: '12px', color: '#6b7280', textAlign: 'center' }}>
-                    Dataset size: {selectedSize} | Lower value = more consistent | Runs: {benchmarkRuns}
+                  <p style={{ margin: '0 0 4px', fontSize: '11px', color: '#6b7280', textAlign: 'center' }}>
+                    {chartSubtitle}
+                  </p>
+                  <p style={{ margin: '0 0 16px', fontSize: '11px', color: '#9ca3af', textAlign: 'center', fontStyle: 'italic' }}>
+                    Y-axis uses logarithmic scale — lower value means more consistent performance
                   </p>
                   <ResponsiveContainer width="100%" height={320}>
-                    <BarChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 80 }}>
+                    <BarChart data={chartData} margin={{ top: 10, right: 30, left: 20, bottom: 80 }}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="name" angle={-30} textAnchor="end" tick={{ fontSize: 11 }} interval={0} />
-                      <YAxis tick={{ fontSize: 11 }} label={{ value: 'StDev (ms)', angle: -90, position: 'insideLeft', offset: 10, style: { fontSize: 11 } }} />
+                      <YAxis
+                        scale="log"
+                        domain={['auto', 'auto']}
+                        tick={{ fontSize: 11 }}
+                        label={{ value: 'StDev (ms) log scale', angle: -90, position: 'insideLeft', offset: 10, style: { fontSize: 11 } }}
+                      />
                       <Tooltip formatter={(value) => `${value}ms`} />
                       <Legend verticalAlign="top" height={36} />
                       <Bar dataKey="MySQL StDev"   fill="#3b82f6" name="MySQL StDev" />
